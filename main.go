@@ -64,7 +64,7 @@ func arrayMap(strArray []string, cb func(string) string) []string {
 	return newArr
 }
 
-func makeQueriesCall(queries []string, ch chan []string) {
+func makeQueriesCall(queries []string, writeCh chan string) {
 	rangeCh := make(chan string, len(queries))
 	chNext := make(chan string)
 	results := make([]string, 0)
@@ -74,8 +74,24 @@ func makeQueriesCall(queries []string, ch chan []string) {
 	<-chNext
 	for currCh := range rangeCh {
 		results = append(results, currCh)
+		writeCh <- currCh
 	}
-	ch <- results
+	close(writeCh)
+}
+
+func createFile(ch chan string, doneChan chan string) {
+	i := 0
+	for result := range ch {
+		f, err := os.Create(fmt.Sprintf("%d.txt", i))
+		if err != nil {
+			doneChan <- "FAIL"
+		}
+		f.Write(([]byte)(result))
+		f.Close()
+		i = i + 1
+		fmt.Println("Result of ", i, "is written", (fmt.Sprintf("%d.txt", i)))
+	}
+	doneChan <- "Done Writing"
 }
 
 func main() {
