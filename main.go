@@ -2,13 +2,15 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 )
 
-func makeCall(url string, ch chan string) {
+func makeCall(url string, ch chan string, cb func()) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		ch <- "FAIL"
@@ -25,6 +27,7 @@ func makeCall(url string, ch chan string) {
 		ch <- "FAIL"
 	}
 	ch <- string(body)
+	cb()
 }
 
 func getQueries(ch chan []string) {
@@ -38,6 +41,41 @@ func getQueries(ch chan []string) {
 		words = append(words, word)
 	}
 	ch <- words
+}
+
+func waitForAllCalls(urls []string, rangeCh chan string, ch chan string) {
+	var wg *sync.WaitGroup
+	wg.Add(len(urls))
+	for _, url := range urls {
+		go makeCall(url, rangeCh, func() {
+			wg.Done()
+		})
+	}
+	ch <- "Done"
+	wg.Wait()
+	close(rangeCh)
+}
+
+func arrayMap(strArray []string, cb func(string) string) []string {
+	newArr := make([]string, len(strArray))
+	for _, word := range strArray {
+		newArr = append(newArr, cb(word))
+	}
+	return newArr
+}
+
+func makeQueriesCall(queries []string, ch chan []string) {
+	rangeCh := make(chan string, len(queries))
+	chNext := make(chan string)
+	results := make([]string, 0)
+	go waitForAllCalls(arrayMap(queries, func(q string) string {
+		return fmt.Sprintf("https://www.google.com/search?q=%s", q)
+	}), rangeCh, chNext)
+	<-chNext
+	for currCh := range rangeCh {
+		results = append(results, currCh)
+	}
+	ch <- results
 }
 
 func main() {
