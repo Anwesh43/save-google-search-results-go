@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -15,15 +16,18 @@ func makeCall(url string, ch chan string, cb func()) {
 	if err != nil {
 		ch <- "FAIL"
 	}
+	fmt.Println(url)
 
 	cl := http.Client{Timeout: 10 * time.Second}
 	res, err := cl.Do(req)
 	if err != nil {
 		ch <- "FAIL"
+		cb()
+		return
 	}
 	defer res.Body.Close()
 	body, err := ioutil.ReadAll(res.Body)
-	if err == nil {
+	if err != nil {
 		ch <- "FAIL"
 	}
 	ch <- string(body)
@@ -31,6 +35,7 @@ func makeCall(url string, ch chan string, cb func()) {
 }
 
 func getQueries(ch chan []string) {
+	fmt.Println("Please start writing")
 	words := make([]string, 0)
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
@@ -44,7 +49,7 @@ func getQueries(ch chan []string) {
 }
 
 func waitForAllCalls(urls []string, rangeCh chan string, ch chan string) {
-	var wg *sync.WaitGroup
+	var wg sync.WaitGroup
 	wg.Add(len(urls))
 	for _, url := range urls {
 		go makeCall(url, rangeCh, func() {
@@ -59,7 +64,10 @@ func waitForAllCalls(urls []string, rangeCh chan string, ch chan string) {
 func arrayMap(strArray []string, cb func(string) string) []string {
 	newArr := make([]string, len(strArray))
 	for _, word := range strArray {
-		newArr = append(newArr, cb(word))
+
+		if strings.Trim(word, "") != "" {
+			newArr = append(newArr, cb(word))
+		}
 	}
 	return newArr
 }
@@ -82,7 +90,10 @@ func makeQueriesCall(queries []string, writeCh chan string) {
 func createFile(ch chan string, doneChan chan string) {
 	i := 0
 	for result := range ch {
-		f, err := os.Create(fmt.Sprintf("%d.txt", i))
+		if result == "FAIL" {
+			continue
+		}
+		f, err := os.Create(fmt.Sprintf("search_%d.html", i))
 		if err != nil {
 			doneChan <- "FAIL"
 		}
@@ -95,5 +106,13 @@ func createFile(ch chan string, doneChan chan string) {
 }
 
 func main() {
+	chArr := make(chan []string)
 
+	go getQueries(chArr)
+	words := <-chArr
+	writeCh := make(chan string, len(words))
+	doneCh := make(chan string)
+	go makeQueriesCall(words, writeCh)
+	go createFile(writeCh, doneCh)
+	<-doneCh
 }
